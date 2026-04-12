@@ -12,7 +12,7 @@ int main(int argc, char *argv[]) {
     state->lower_dir = realpath(argv[1], NULL);
     state->upper_dir = realpath(argv[2], NULL);
 
-    // construct a new argv for FUSE: [program_name, mount_point, ...flags]
+    //construct a new argv for FUSE: [program_name, mount_point, ...flags]
     char *fuse_argv[argc];
     fuse_argv[0] = argv[0];
     fuse_argv[1] = argv[3]; // mount
