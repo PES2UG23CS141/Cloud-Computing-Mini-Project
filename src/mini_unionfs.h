@@ -10,5 +10,5 @@ struct mini_unionfs_state {
     char* upper_dir; /* read write layer */
 };
 
-// macro for easy access to the state
+//macro for easy access to the state
 #define UNIONFS_DATA ((struct mini_unionfs_state *) fuse_get_context()->private_data)
