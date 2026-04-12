@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-// from path_utils.c
+//from path_utils.c
 extern int resolve_path(const char *path, char *resolved_path);
 // from cow_logic.c
 extern int copy_file(const char *src, const char *dst);
