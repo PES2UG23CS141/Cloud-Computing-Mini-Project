@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <limits.h>
 
 // uthash to track seen/hidden files
 struct file_entry {
@@ -17,6 +18,7 @@ struct file_entry {
 extern int resolve_path(const char *path, char *resolved_path);
 // from cow_logic.c
 extern int copy_file(const char *src, const char *dst);
+extern void ensure_dir_path(const char *upper_dir, const char *path);
 
 static int unionfs_getattr(const char *path, struct stat *stbuf, struct fuse_file_info *fi) {
     char resolved[PATH_MAX];
@@ -102,6 +104,8 @@ static int unionfs_open(const char *path, struct fuse_file_info *fi) {
 
     // if write and the file only exists in lower_dir, trigger CoW
     if (is_write && access(up_path, F_OK) != 0 && access(lo_path, F_OK) == 0) {
+        // Ensure the directory exists in upper before copying the file
+        ensure_dir_path(st->upper_dir, path);
         int res = copy_file(lo_path, up_path);
         if (res != 0) return res;
     }
@@ -195,6 +199,22 @@ static int unionfs_unlink(const char *path) {
     return 0;
 }
 
+// Recursive helper removes all whiteout files in a directory
+static void cleanup_upper_dir(const char *phys_path) {
+    DIR *dp = opendir(phys_path);
+    if (!dp) return;
+    struct dirent *de;
+    while ((de = readdir(dp)) != NULL) {
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0) continue;
+        char sub_path[PATH_MAX];
+        snprintf(sub_path, PATH_MAX, "%s/%s", phys_path, de->d_name);
+        if (de->d_type == DT_DIR) cleanup_upper_dir(sub_path);
+        unlink(sub_path); 
+        rmdir(sub_path);
+    }
+    closedir(dp);
+}
+
 static int unionfs_rmdir(const char *path) {
     struct mini_unionfs_state *st = UNIONFS_DATA;
     char up_path[PATH_MAX], lo_path[PATH_MAX], wh_path[PATH_MAX];
@@ -202,12 +222,21 @@ static int unionfs_rmdir(const char *path) {
     snprintf(up_path, PATH_MAX, "%s%s", st->upper_dir, path);
     snprintf(lo_path, PATH_MAX, "%s%s", st->lower_dir, path);
 
-    // If it exists in upper_dir, use rmdir()
+    // Handle the Upper Directory
     if (access(up_path, F_OK) == 0) {
-        if (rmdir(up_path) == -1) return -errno;
+        // Attempt physical removal
+        if (rmdir(up_path) == -1) {
+            // If it failed because of whiteout clutter, clean it and try again
+            if (errno == ENOTEMPTY) {
+                cleanup_upper_dir(up_path);
+                if (rmdir(up_path) == -1) return -errno;
+            } else {
+                return -errno;
+            }
+        }
     }
 
-    // If it exists in lower_dir, mask it with a whiteout
+    // Handle the Lower Directory (Create the Whiteout)
     if (access(lo_path, F_OK) == 0) {
         get_whiteout_path(path, wh_path);
         int fd = creat(wh_path, 0666);
